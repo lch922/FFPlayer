@@ -12,7 +12,7 @@ extern "C"{
 #include <libavcodec\avcodec.h>
 
 }
-
+struct MediaState;
 struct PacketQueue
 {
 	std::queue<AVPacket> queue;
@@ -24,8 +24,11 @@ struct PacketQueue
 
     SDL_cond *empty_queue_cond;
     int64_t duration;
+    AVMediaType queueType;
 
-	PacketQueue();
+    MediaState *media_state;
+    PacketQueue(MediaState *media);
+    ~PacketQueue();
 	bool enQueue(const AVPacket *packet);
 	bool deQueue(AVPacket *packet, bool block);
 };

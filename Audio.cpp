@@ -1,6 +1,6 @@
 
 #include "Audio.h"
-
+#include "Media.h"
 #include <iostream>
 #include <fstream>
 extern "C" {
@@ -13,35 +13,37 @@ extern "C" {
 /* Calculate actual buffer size keeping in mind not cause too frequent audio callbacks */
 #define SDL_AUDIO_MAX_CALLBACKS_PER_SEC 30
 
-extern bool quit;
 
-AudioState::AudioState()
-    :BUFFER_SIZE(192000 * 2)
+AudioState::AudioState(MediaState* media)
+    :BUFFER_SIZE(192000 * 2),
+      audioq(media),
+      media_state(media)
 {
     audio_ctx = NULL;
     stream_index = -1;
-    stream = NULL;
-    audio_clock = 0;
+    Init();
+}
 
+AudioState::AudioState(MediaState* media, AVCodecContext *audioCtx, int index, int volume)
+    :BUFFER_SIZE(192000),
+      audioq(media),
+      media_state(media)
+{
+    audio_ctx = audioCtx;
+    stream_index = index;
+    Init();
+}
+
+
+void AudioState::Init()
+{
     audio_buff = new uint8_t[BUFFER_SIZE];
     audio_buff_size = 0;
     audio_buff_index = 0;
     audio_volume = 80;//SDL_MIX_MAXVOLUME;
-
-
+    stream = NULL;
+    audio_clock = 0;
     swr_ctx = NULL;
-}
-
-AudioState::AudioState(AVCodecContext *audioCtx, int index, int volume)
-    :BUFFER_SIZE(192000)
-{
-    audio_ctx = audioCtx;
-    stream_index = index;
-
-    audio_volume = volume;
-    audio_buff = new uint8_t[BUFFER_SIZE];
-    audio_buff_size = 0;
-    audio_buff_index = 0;
 }
 
 AudioState::~AudioState()
@@ -49,6 +51,9 @@ AudioState::~AudioState()
     if (audio_buff)
         delete[] audio_buff;
 
+    if (NULL != audio_ctx){
+        avcodec_close(audio_ctx);
+    }
     swr_free(&swr_ctx);
 }
 
@@ -65,7 +70,8 @@ bool AudioState::audio_play()
             wanted_nb_channels = audio_ctx->channels,
             wanted_sample_rate = audio_ctx->sample_rate;
 
-    if (!wanted_channel_layout || wanted_nb_channels != av_get_channel_layout_nb_channels(wanted_channel_layout)) {
+    if (!wanted_channel_layout || wanted_nb_channels !=
+            av_get_channel_layout_nb_channels(wanted_channel_layout)) {
         wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);
         wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
     }
@@ -115,14 +121,13 @@ double AudioState::get_audio_clock()
     return pts;
 }
 
+
 /**
 * 向设备发送audio数据的回调函数
 */
 void audio_callback(void* userdata, Uint8 *stream, int len)
 {
     AudioState *audio_state = (AudioState*)userdata;
-
-//    SDL_memset(stream, 0, len);
 
     int audio_size = 0;
     int len1 = 0;
@@ -167,11 +172,15 @@ int audio_decode_frame(AudioState *audio_state, uint8_t *audio_buf, int buf_size
 
     static double clock = 0;
 
-    if (quit)
+    if (audio_state->media_state->quit)
         return -1;
     if (!audio_state->audioq.deQueue(&pkt, true))
         return -1;
 
+    if (pkt.buf == NULL && pkt.size == 0) {
+        //播放完成
+        return -1;
+    }
     if (pkt.pts != AV_NOPTS_VALUE)
     {
         audio_state->audio_clock = av_q2d(audio_state->stream->time_base) * pkt.pts;
@@ -179,11 +188,11 @@ int audio_decode_frame(AudioState *audio_state, uint8_t *audio_buf, int buf_size
     //TODO
     //	int ret = avcodec_send_packet(audio_state->audio_ctx, &pkt);
     //	if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
-    //		return -1;
+    //    	return -1;
 
     //	ret = avcodec_receive_frame(audio_state->audio_ctx, frame);
     //	if (ret < 0 && ret != AVERROR_EOF)
-    //		return -1;
+    //    	return -1;
     int got_picture;
     int ret = avcodec_decode_audio4( audio_state->audio_ctx, frame,&got_picture, &pkt);
     if ( ret < 0 ) {

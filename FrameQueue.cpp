@@ -4,9 +4,14 @@
 FrameQueue::FrameQueue()
 {
 	nb_frames = 0;
-
 	mutex     = SDL_CreateMutex();
-	cond      = SDL_CreateCond();
+    cond      = SDL_CreateCond();
+}
+
+FrameQueue::~FrameQueue()
+{
+    SDL_DestroyCond(cond);
+    SDL_DestroyMutex(mutex);
 }
 
 bool FrameQueue::enQueue(const AVFrame* frame)
@@ -15,7 +20,7 @@ bool FrameQueue::enQueue(const AVFrame* frame)
 
 	int ret = av_frame_ref(p, frame);
 	if (ret < 0)
-		return false;
+        return false;
 
 	p->opaque = (void *)new double(*(double*)p->opaque); //上一个指向的是一个局部的变量，这里重新分配pts空间
 
@@ -23,10 +28,10 @@ bool FrameQueue::enQueue(const AVFrame* frame)
 	queue.push(p);
 
 	nb_frames++;
-	
+
 	SDL_CondSignal(cond);
 	SDL_UnlockMutex(mutex);
-	
+
 	return true;
 }
 
@@ -36,30 +41,30 @@ bool FrameQueue::deQueue(AVFrame **frame)
 
 	SDL_LockMutex(mutex);
 	while (true)
-	{
-		if (!queue.empty())
-		{
-			if (av_frame_ref(*frame, queue.front()) < 0)
-			{
-				ret = false;
-				break;
-			}
+    {
+        if (!queue.empty())
+        {
+            if (av_frame_ref(*frame, queue.front()) < 0)
+            {
+                ret = false;
+                break;
+            }
 
             AVFrame* tmp = queue.front();
-			queue.pop();
+            queue.pop();
 
-			av_frame_free(&tmp);
+            av_frame_free(&tmp);
 
-			nb_frames--;
+            nb_frames--;
 
-			ret = true;
-			break;
-		}
-		else
-		{
-			SDL_CondWait(cond, mutex);
-		}
-	}
+            ret = true;
+            break;
+        }
+        else
+        {
+            SDL_CondWait(cond, mutex);
+        }
+    }
 
 	SDL_UnlockMutex(mutex);
 	return ret;

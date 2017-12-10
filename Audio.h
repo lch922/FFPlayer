@@ -8,7 +8,7 @@ extern "C"{
 #include <libavformat/avformat.h>
 
 }
-
+struct MediaState;
 
 /**
  * 播放audio时所需要的数据封装
@@ -30,19 +30,21 @@ struct AudioState
 	int stream_index;          // audio流index
 	AVCodecContext *audio_ctx; // 已经调用avcodec_open2打开
     struct SwrContext *swr_ctx;
+    MediaState *media_state;
 
-	AudioState();              //默认构造函数
-    AudioState(AVCodecContext *audio_ctx, int audio_stream, int volume = SDL_MIX_MAXVOLUME);
-	
-	~AudioState();
+    AudioState(MediaState* media);              //默认构造函数
+    AudioState(MediaState* media, AVCodecContext *audio_ctx, int audio_stream, int volume = SDL_MIX_MAXVOLUME);
 
-	/**
-	* audio play
-	*/
+    ~AudioState();
+
+    /**
+    * audio play
+    */
 	bool audio_play();
 
-	// get audio clock
+    // get audio clock
 	double get_audio_clock();
+    void Init();
 };
 
 /**

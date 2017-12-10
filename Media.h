@@ -21,11 +21,13 @@ struct MediaState
 	AVFormatContext *pFormatCtx;
     SDL_cond *continue_read_thread;
 	char* filename;
-	//bool quit;
-
+    bool demuxFinish;
+    bool quit;
+    SDL_Thread *thread;
 	MediaState(char *filename);
+    int Loop();
 
-	~MediaState();
+    ~MediaState();
 
 	bool openInput();
 };

@@ -15,9 +15,10 @@ TARGET = FSPlayer
 TEMPLATE = app
 
 SOURCES += \
-    main.cpp \
+#    main.cpp \
 #    sdl_video.cpp \
 #    simplest_ffmpeg_audio_player.cpp \
+#    myPlay.cpp \
     Audio.cpp \
     FrameQueue.cpp \
     Media.cpp \

@@ -6,14 +6,11 @@
 #include <queue>
 
 extern "C"{
-
 #include <libavcodec\avcodec.h>
-
 }
-
 struct FrameQueue
 {
-	static const int capacity = 30;
+    static const int capacity = 30;
 
 	std::queue<AVFrame*> queue;
 
@@ -22,7 +19,8 @@ struct FrameQueue
 	SDL_mutex* mutex;
 	SDL_cond * cond;
 
-	FrameQueue();
+    FrameQueue();
+    ~FrameQueue();
 	bool enQueue(const AVFrame* frame);
 	bool deQueue(AVFrame **frame);
 };

@@ -39,14 +39,15 @@ struct VideoState
 	SDL_Texture *bmp;
 	SDL_Rect rect;
     MediaState *media_state;
+    SDL_Thread * thread;
 
-	void video_play(MediaState *media);
+    void video_play();
 
 	double synchronize(AVFrame *srcFrame, double pts);
-	
-	VideoState();
 
-	~VideoState();
+    VideoState(MediaState *media);
+
+    ~VideoState();
 };
 
 

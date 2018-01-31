@@ -23,36 +23,27 @@ MediaState::MediaState(char* input_file)
     thread = NULL;
 }
 
-int MediaState::Loop()
+void MediaState::Start()
 {
-    video->video_play(); // create video thread
-
-    SDL_Event event;
-    while (true) // SDL event loop
-    {
-        if (demuxFinish && video->videoq->queue.empty() && audio->audioq.queue.empty()) {
-            qDebug() << "play finish";
-            break;
-        }
-        SDL_WaitEvent(&event);
-        switch (event.type)
-        {
-        case FF_QUIT_EVENT:
-        case SDL_QUIT:
-            quit = 1;
-            SDL_Quit();
-
-            return 0;
-            break;
-
-        case FF_REFRESH_EVENT:
-            video_refresh_timer(this);
-            break;
-
-        default:
-            break;
-        }
+    if (openInput()){
+        video->video_play(); // create video thread
+    } else {
+        qDebug("openInput error");
     }
+}
+
+
+bool MediaState::ProcEvent(SDL_Event &event)
+{
+    if (event.type == FF_REFRESH_EVENT && event.user.data1 == this) {
+        video_refresh_timer(this);
+        return true;
+    }
+}
+
+bool MediaState::PlayFinish()
+{
+    return demuxFinish && video->videoq->queue.empty() && audio->audioq.queue.empty();
 }
 
 MediaState::~MediaState()

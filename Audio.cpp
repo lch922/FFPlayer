@@ -40,7 +40,7 @@ void AudioState::Init()
     audio_buff = new uint8_t[BUFFER_SIZE];
     audio_buff_size = 0;
     audio_buff_index = 0;
-    audio_volume = 80;//SDL_MIX_MAXVOLUME;
+    audio_volume = 80;
     stream = NULL;
     audio_clock = 0;
     swr_ctx = NULL;
@@ -185,14 +185,7 @@ int audio_decode_frame(AudioState *audio_state, uint8_t *audio_buf, int buf_size
     {
         audio_state->audio_clock = av_q2d(audio_state->stream->time_base) * pkt.pts;
     }
-    //TODO
-    //	int ret = avcodec_send_packet(audio_state->audio_ctx, &pkt);
-    //	if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
-    //    	return -1;
 
-    //	ret = avcodec_receive_frame(audio_state->audio_ctx, frame);
-    //	if (ret < 0 && ret != AVERROR_EOF)
-    //    	return -1;
     int got_picture;
     int ret = avcodec_decode_audio4( audio_state->audio_ctx, frame,&got_picture, &pkt);
     if ( ret < 0 ) {

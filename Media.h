@@ -25,7 +25,9 @@ struct MediaState
     bool quit;
     SDL_Thread *thread;
 	MediaState(char *filename);
-    int Loop();
+    void Start();
+    bool ProcEvent(SDL_Event &event);
+    bool PlayFinish();
 
     ~MediaState();
 

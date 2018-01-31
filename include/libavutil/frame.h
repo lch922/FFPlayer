@@ -195,7 +195,7 @@ typedef struct AVFrame {
      * Values correspond to enum AVPixelFormat for video frames,
      * enum AVSampleFormat for audio)
      */
-    int format;
+    AVPixelFormat format;
 
     /**
      * 1 -> keyframe, 0-> not

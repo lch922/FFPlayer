@@ -120,14 +120,6 @@ int  video_decode(void *arg)
             //²¥·ÅÍê³É
             break;
         }
-        //TODO
-//    	int ret = avcodec_send_packet(video->video_ctx, &packet);
-//    	if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
-//        	continue;
-
-//    	ret = avcodec_receive_frame(video->video_ctx, frame);
-//    	if (ret < 0 && ret != AVERROR_EOF)
-//        	continue;
         int got_frame;
         int ret = avcodec_decode_video2(video->video_ctx, frame, &got_frame, &packet);
         if (ret < 0) {

@@ -52,7 +52,6 @@ typedef struct PacketQueue {
     SDL_mutex *mutex;
     SDL_cond *cond;
 } PacketQueue;
-
 #define VIDEO_PICTURE_QUEUE_SIZE 3
 #define SUBPICTURE_QUEUE_SIZE 16
 #define SAMPLE_QUEUE_SIZE 9
@@ -217,7 +216,7 @@ static int screen_width  = 0;
 static int screen_height = 0;
 static int64_t start_time = AV_NOPTS_VALUE;
 static int64_t duration = AV_NOPTS_VALUE;
-static int framedrop = 1;
+static int framedrop = 0;
 
 /* current context */
 static int64_t audio_callback_time;
@@ -235,6 +234,37 @@ AVRational InitAVRational(int num, int den)
     a.num = num;
     a.den = den;
     return a;
+}
+
+
+static av_always_inline av_const int avpriv_isnanf(float x)
+{
+    uint32_t v = av_float2int(x);
+    if ((v & 0x7f800000) != 0x7f800000)
+        return 0;
+    return v & 0x007fffff;
+}
+
+
+static av_always_inline av_const int avpriv_isnan(double x)
+{
+    uint64_t v = av_double2int(x);
+    if ((v & 0x7ff0000000000000) != 0x7ff0000000000000)
+        return 0;
+    return (v & 0x000fffffffffffff) && 1;
+}
+
+#define isnan(x)                  \
+    (sizeof(x) == sizeof(float)   \
+        ? avpriv_isnanf(x)        \
+        : avpriv_isnan(x))
+
+
+
+
+static av_always_inline av_const long int lrint(double x)
+{
+    return (x + 0.5);
 }
 
 static int packet_queue_put_private(PacketQueue *q, AVPacket *pkt)
@@ -432,14 +462,13 @@ static int decoder_decode_frame(Decoder *d, AVFrame *frame, AVSubtitle *sub) {
                 ret = avcodec_decode_video2(d->avctx, frame, &got_frame, &d->pkt_temp);
                 if (got_frame) {
                     frame->pts = av_frame_get_best_effort_timestamp(frame);
+                    //frame->pts = frame->pkt_dts;
                 }
                 break;
             case AVMEDIA_TYPE_AUDIO:
                 ret = avcodec_decode_audio4(d->avctx, frame, &got_frame, &d->pkt_temp);
                 if (got_frame) {
-                    AVRational tb;// = (AVRational){1, frame->sample_rate};
-                    tb.num = 1;
-                    tb.den = frame->sample_rate;
+                    AVRational tb = InitAVRational(1, frame->sample_rate);
                     if (frame->pts != AV_NOPTS_VALUE)
                         frame->pts = av_rescale_q(frame->pts, av_codec_get_pkt_timebase(d->avctx), tb);
                     else if (d->next_pts != AV_NOPTS_VALUE)
@@ -663,10 +692,6 @@ static int realloc_texture(SDL_Texture **texture, Uint32 new_format, int new_wid
     return 0;
 }
 
-static av_always_inline av_const long int lrint(double x)
-{
-    return (x + 0.5);
-}
 static void calculate_display_rect(SDL_Rect *rect,
                                    int scr_xleft, int scr_ytop, int scr_width, int scr_height,
                                    int pic_width, int pic_height, AVRational pic_sar)
@@ -746,6 +771,8 @@ static void video_image_display(VideoState *is)
     SDL_Rect rect;
 
     vp = frame_queue_peek_last(&is->pictq);
+    LogDebug("pts:%f, pts:%lld, pkt_pts:%lld, pkt_dts:%lld",
+             vp->pts, vp->frame->pts, vp->frame->pkt_pts, vp->frame->pkt_dts);
 
     calculate_display_rect(&rect, is->xleft, is->ytop, is->width, is->height, vp->width, vp->height, vp->sar);
 
@@ -851,6 +878,9 @@ static void do_exit(VideoState *is)
         SDL_DestroyWindow(window);
     av_lockmgr_register(NULL);
     avformat_network_deinit();
+    SDL_Quit();
+    av_log(NULL, AV_LOG_QUIET, "%s", "");
+    exit(0);
 }
 
 
@@ -956,29 +986,6 @@ static void init_clock(Clock *c, int *queue_serial)
     c->queue_serial = queue_serial;
     set_clock(c, NAN, -1);
 }
-
-static av_always_inline av_const int avpriv_isnanf(float x)
-{
-    uint32_t v = av_float2int(x);
-    if ((v & 0x7f800000) != 0x7f800000)
-        return 0;
-    return v & 0x007fffff;
-}
-
-
-static av_always_inline av_const int avpriv_isnan(double x)
-{
-    uint64_t v = av_double2int(x);
-    if ((v & 0x7ff0000000000000) != 0x7ff0000000000000)
-        return 0;
-    return (v & 0x000fffffffffffff) && 1;
-}
-
-#define isnan(x)                  \
-    (sizeof(x) == sizeof(float)   \
-        ? avpriv_isnanf(x)        \
-        : avpriv_isnan(x))
-
 
 static void sync_clock_to_slave(Clock *c, Clock *slave)
 {
@@ -1114,6 +1121,10 @@ static double compute_target_delay(double delay, VideoState *is)
                 delay = 2 * delay;
         }
     }
+#ifdef DEGBUG
+    LogDebug(NULL, AV_LOG_TRACE, "video: delay=%0.3f A-V=%f",
+            delay, -diff);
+#endif
     return delay;
 }
 
@@ -1213,6 +1224,41 @@ display:
             video_display(is);
     }
     is->force_refresh = 0;
+#ifdef DEBUG
+    if (false){
+        static int64_t last_time;
+        int64_t cur_time;
+        int aqsize, vqsize;
+        double av_diff;
+
+        cur_time = av_gettime_relative();
+        if (!last_time || (cur_time - last_time) >= 30000) {
+            aqsize = 0;
+            vqsize = 0;
+            if (is->audio_st)
+                aqsize = is->audioq.size;
+            if (is->video_st)
+                vqsize = is->videoq.size;
+            av_diff = 0;
+            if (is->audio_st && is->video_st)
+                av_diff = get_clock(&is->audclk) - get_clock(&is->vidclk);
+            else if (is->video_st)
+                av_diff = get_master_clock(is) - get_clock(&is->vidclk);
+            else if (is->audio_st)
+                av_diff = get_master_clock(is) - get_clock(&is->audclk);
+            LogDebug("%7.2f %s:%7.3f fd=%4d aq=%5dKB vq=%5dKB f=%lld/%lld",
+                   get_master_clock(is),
+                   (is->audio_st && is->video_st) ? "A-V" : (is->video_st ? "M-V" : (is->audio_st ? "M-A" : "   ")),
+                   av_diff,
+                   is->frame_drops_early + is->frame_drops_late,
+                   aqsize / 1024,
+                   vqsize / 1024,
+                   is->video_st ? is->viddec.avctx->pts_correction_num_faulty_dts : 0ll,
+                   is->video_st ? is->viddec.avctx->pts_correction_num_faulty_pts : 0ll);
+            last_time = cur_time;
+        }
+    }
+#endif
 }
 
 static void set_default_window_size(int width, int height, AVRational sar)
@@ -1228,8 +1274,8 @@ static int queue_picture(VideoState *is, AVFrame *src_frame, double pts, double 
     Frame *vp;
 
 #ifdef DEBUG
-    LogDebug("frame_type=%c pts=%0.3f",
-           av_get_picture_type_char(src_frame->pict_type), pts);
+//    LogDebug("frame_type=%c pts=%0.3f",
+//           av_get_picture_type_char(src_frame->pict_type), pts);
 #endif
     if (!(vp = frame_queue_peek_writable(&is->pictq)))
         return -1;
@@ -1316,7 +1362,7 @@ static int audio_thread(void *arg)
                 AVRational a;
                 a.num = frame->nb_samples;
                 a.den = frame->sample_rate;
-
+                af->duration = av_q2d(a);
                 av_frame_move_ref(af->frame, frame);
                 frame_queue_push(&is->sampq);
 
@@ -1402,9 +1448,11 @@ static int synchronize_audio(VideoState *is, int nb_samples)
                     max_nb_samples = ((nb_samples * (100 + SAMPLE_CORRECTION_PERCENT_MAX) / 100));
                     wanted_nb_samples = av_clip(wanted_nb_samples, min_nb_samples, max_nb_samples);
                 }
-                av_log(NULL, AV_LOG_VERBOSE, "diff=%f adiff=%f sample_diff=%d apts=%0.3f %f\n",
+#ifdef DEBUG
+                LogDebug("diff=%f adiff=%f sample_diff=%d apts=%0.3f %f\n",
                         diff, avg_diff, wanted_nb_samples - nb_samples,
                         is->audio_clock, is->audio_diff_threshold);
+#endif
             }
         } else {
             /* too big difference : may be initial PTS errors, so
@@ -1525,7 +1573,7 @@ static int audio_decode_frame(VideoState *is)
         is->audio_clock = NAN;
     is->audio_clock_serial = af->serial;
 #ifdef DEBUG
-    {
+    if (0) {
         static double last_clock;
         LogDebug("audio: delay=%0.3f clock=%0.3f clock0=%0.3f",
                is->audio_clock - last_clock,
@@ -1663,9 +1711,7 @@ static int stream_component_open(VideoState *is, int stream_index)
         return AVERROR(ENOMEM);
     if (avcodec_copy_context(avctx, ic->streams[stream_index]->codec) != 0)
         return false;
-//    av_codec_set_pkt_timebase(avctx, ic->streams[stream_index]->time_base);
-
-//    codec = avcodec_find_decoder(avctx->codec_id);
+    av_codec_set_pkt_timebase(avctx, ic->streams[stream_index]->time_base);
     codec = avcodec_find_decoder(ic->streams[stream_index]->codec->codec_id);
 
     switch(avctx->codec_type){
@@ -1773,14 +1819,14 @@ static int read_thread(void *arg)
     is->last_audio_stream = is->audio_stream = -1;
     is->eof = 0;
 
-//    ic = avformat_alloc_context();
-//    if (!ic) {
-//        av_log(NULL, AV_LOG_FATAL, "Could not allocate context.\n");
-//        ret = AVERROR(ENOMEM);
-//        goto fail;
-//    }
-//    ic->interrupt_callback.callback = decode_interrupt_cb;
-//    ic->interrupt_callback.opaque = is;
+    ic = avformat_alloc_context();
+    if (!ic) {
+        av_log(NULL, AV_LOG_FATAL, "Could not allocate context.\n");
+        ret = AVERROR(ENOMEM);
+        goto fail;
+    }
+    ic->interrupt_callback.callback = decode_interrupt_cb;
+    ic->interrupt_callback.opaque = is;
 
     err = avformat_open_input(&ic, is->filename, NULL, NULL);
     if (err < 0) {
@@ -1792,6 +1838,7 @@ static int read_thread(void *arg)
 
     is->ic = ic;
 
+    ic->flags |= AVFMT_FLAG_GENPTS;
     orig_nb_streams = ic->nb_streams;
 
     err = avformat_find_stream_info(ic, NULL);
@@ -1980,7 +2027,7 @@ static VideoState *stream_open(const char *filename)
         goto fail;
 
     if (packet_queue_init(&is->videoq) < 0 ||
-        packet_queue_init(&is->audioq) < 00)
+        packet_queue_init(&is->audioq) < 0)
         goto fail;
 
     if (!(is->continue_read_thread = SDL_CreateCond())) {
@@ -2083,7 +2130,7 @@ int main(int argc, char **argv)
 
     av_init_packet(&flush_pkt);
     flush_pkt.data = (uint8_t *)&flush_pkt;
-    is = stream_open("E:/media/video/duowei.mp4");//baishi.mpg");
+    is = stream_open("E:/media/video/duowei.mp4");//baishi.mpg
     if (!is) {
         av_log(NULL, AV_LOG_FATAL, "Failed to initialize VideoState!\n");
         do_exit(NULL);
